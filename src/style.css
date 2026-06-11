@@ -1,0 +1,192 @@
+:root {
+  --font-family: 'Inter', 'Outfit', system-ui, -apple-system, sans-serif;
+
+  /* Gobernación de Antioquia — Paleta Institucional Oficial */
+  --bg-dark: 0 0% 100%;
+  --bg-card: 0 0% 100%;
+  --border-color: 220 13% 88%;
+
+  --primary-rgb: 170, 27, 34;     /* Rojo Institucional UdeM (#AA1B22) */
+  --primary: 357 73% 39%;        /* Rojo UdeM */
+  --secondary: 357 73% 25%;      /* Rojo Oscuro UdeM */
+  --accent: 40 48% 56%;          /* Dorado UdeM (#C5A059) */
+
+  --success: 150 100% 35%;       /* Verde Claro (#00B259) — Pantone 354C */
+  --warning: 44 100% 50%;        /* Amarillo (#FFD100) */
+  --danger: 0 72% 45%;           /* Rojo para acciones destructivas */
+  --text-muted: 220 9% 46%;
+  --text-light: 220 15% 15%;
+
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: hsl(var(--bg-dark));
+  color: hsl(var(--text-light));
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+#app {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Glassmorphism utility */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  border-radius: 12px;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border-color));
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(170, 27, 34, 0.45);
+}
+
+/* Canvas background */
+.grid-bg {
+  background-color: #ffffff;
+  background-image: none;
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 4px 15px rgba(170, 27, 34, 0.14);
+}
+
+.glow-success {
+  box-shadow: 0 4px 15px rgba(0, 178, 89, 0.12);
+}
+
+.glow-warning {
+  box-shadow: 0 4px 15px rgba(245, 166, 35, 0.12);
+}
+
+/* Form controls */
+input, select, textarea {
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--glass-border);
+  color: hsl(var(--text-light));
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-family: var(--font-family);
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: rgba(0, 133, 63, 0.55);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(0, 133, 63, 0.15);
+}
+
+button {
+  font-family: var(--font-family);
+  font-weight: 500;
+  font-size: 0.9rem;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+  color: white;
+  box-shadow: 0 4px 14px rgba(0, 133, 63, 0.35);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 6px 20px rgba(0, 133, 63, 0.5);
+}
+
+.btn-secondary {
+  background: rgba(0, 0, 0, 0.04);
+  color: hsl(var(--text-light));
+  border: 1px solid var(--glass-border);
+}
+
+.btn-secondary:hover {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.btn-danger {
+  background: rgba(190, 30, 30, 0.07);
+  color: #c0392b;
+  border: 1px solid rgba(190, 30, 30, 0.15);
+}
+
+.btn-danger:hover {
+  background: rgba(190, 30, 30, 0.14);
+  border-color: rgba(190, 30, 30, 0.3);
+  box-shadow: 0 4px 12px rgba(190, 30, 30, 0.1);
+}
+
+.btn-accent {
+  background: rgba(245, 166, 35, 0.08);
+  color: #c47d00;
+  border: 1px solid rgba(245, 166, 35, 0.2);
+}
+
+.btn-accent:hover {
+  background: rgba(245, 166, 35, 0.15);
+  border-color: rgba(245, 166, 35, 0.35);
+}
+
+/* Tooltip standard */
+.tooltip {
+  position: absolute;
+  padding: 6px 10px;
+  background: rgba(13, 17, 23, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.8rem;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
