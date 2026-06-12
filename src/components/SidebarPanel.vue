@@ -280,6 +280,37 @@
             <span class="val">{{ connectedComponentsCount }}</span>
           </div>
         </div>
+
+        <!-- Índices topológicos -->
+        <div class="indices-title">Índices Topológicos de Conectividad</div>
+
+        <div class="index-card glass">
+          <div class="index-header">
+            <span class="index-name">Índice β</span>
+            <span class="index-formula">β = a / n</span>
+          </div>
+          <div class="index-value">{{ betaIndex }}</div>
+          <div class="index-label" :class="betaLabelClass">{{ betaLabel }}</div>
+          <div class="index-scale">
+            <span :class="{ active: betaIndex !== '—' && +betaIndex < 1 }">Inconexa &lt;1</span>
+            <span :class="{ active: betaIndex !== '—' && +betaIndex >= 1 && +betaIndex < 3 }">Compleja 1–3</span>
+            <span :class="{ active: betaIndex !== '—' && +betaIndex >= 3 }">Muy compleja ≥3</span>
+          </div>
+          <p class="index-desc">Mide el grado de conexión de la red comparando el número de arcos con el número de nodos. Un valor bajo indica que la red carece de circuitos alternativos y es vulnerable ante el corte de cualquier vía.</p>
+        </div>
+
+        <div class="index-card glass">
+          <div class="index-header">
+            <span class="index-name">Índice γ</span>
+            <span class="index-formula">γ = a / [3(n−2)] × 100</span>
+          </div>
+          <div class="index-value">{{ gammaIndex }}<span class="index-unit" v-if="gammaIndex !== '—'">%</span></div>
+          <div class="index-label">{{ gammaLabel }}</div>
+          <div class="index-bar" v-if="gammaIndex !== '—'">
+            <div class="index-bar-fill" :style="{ width: Math.min(+gammaIndex, 100) + '%' }"></div>
+          </div>
+          <p class="index-desc">Expresa qué porcentaje de arcos existen respecto al máximo teórico posible. Indica cuánta conectividad adicional requiere la red para alcanzar su potencial estructural completo.</p>
+        </div>
       </div>
 
     </div>
@@ -541,6 +572,49 @@ const connectedComponentsCount = computed(() => {
   })
   
   return count
+})
+
+// Índice β = a / n  (Cardozo et al., 2009)
+const betaIndex = computed(() => {
+  const n = props.nodes.length
+  if (n === 0) return '—'
+  return (props.edges.length / n).toFixed(3)
+})
+
+const betaLabel = computed(() => {
+  const n = props.nodes.length
+  if (n === 0) return ''
+  const b = props.edges.length / n
+  if (b < 1)  return 'Red inconexa'
+  if (b === 1) return 'Un circuito'
+  if (b < 3)  return 'Red compleja'
+  return 'Red muy compleja'
+})
+
+const betaLabelClass = computed(() => {
+  const b = parseFloat(betaIndex.value)
+  if (isNaN(b)) return ''
+  if (b < 1)  return 'label-low'
+  if (b < 3)  return 'label-mid'
+  return 'label-high'
+})
+
+// Índice γ = a / [3(n − 2)] × 100  (Bautista, 2018)
+const gammaIndex = computed(() => {
+  const n = props.nodes.length
+  if (n <= 2) return '—'
+  const maxArcs = 3 * (n - 2)
+  return ((props.edges.length / maxArcs) * 100).toFixed(1)
+})
+
+const gammaLabel = computed(() => {
+  const n = props.nodes.length
+  if (n <= 2) return ''
+  const g = (props.edges.length / (3 * (n - 2))) * 100
+  if (g < 30)  return 'Muy baja conectividad'
+  if (g < 55)  return 'Baja conectividad'
+  if (g < 75)  return 'Conectividad media'
+  return 'Alta conectividad'
 })
 </script>
 
@@ -1044,5 +1118,115 @@ const connectedComponentsCount = computed(() => {
 .detail-row .val {
   font-weight: 600;
   color: #1f2937;
+}
+
+/* Índices topológicos */
+.indices-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: hsl(var(--text-muted));
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.index-card {
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.02);
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.index-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.index-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.index-formula {
+  font-size: 0.68rem;
+  color: hsl(var(--text-muted));
+  font-style: italic;
+}
+
+.index-value {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: #00853F;
+  line-height: 1;
+}
+
+.index-unit {
+  font-size: 1rem;
+  font-weight: 500;
+  color: hsl(var(--text-muted));
+  margin-left: 2px;
+}
+
+.index-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.label-low  { color: #c0392b; }
+.label-mid  { color: #e67e22; }
+.label-high { color: #00853F; }
+.index-label:not(.label-low):not(.label-mid):not(.label-high) { color: hsl(var(--text-muted)); }
+
+.index-scale {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.index-scale span {
+  font-size: 0.62rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.05);
+  color: hsl(var(--text-muted));
+  border: 1px solid transparent;
+}
+
+.index-scale span.active {
+  background: rgba(0, 133, 63, 0.1);
+  color: #00853F;
+  border-color: rgba(0, 133, 63, 0.25);
+  font-weight: 700;
+}
+
+.index-bar {
+  height: 6px;
+  background: rgba(0,0,0,0.07);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.index-bar-fill {
+  height: 100%;
+  background: linear-gradient(to right, #00853F, #00B259);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.index-desc {
+  font-size: 0.7rem;
+  color: hsl(var(--text-muted));
+  line-height: 1.45;
+  margin-top: 4px;
+  border-top: 1px solid rgba(0,0,0,0.05);
+  padding-top: 6px;
 }
 </style>

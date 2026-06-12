@@ -6290,7 +6290,7 @@
         "nombre": "Vía sin nombre",
         "capa_rodadura": "pavimentada",
         "longitud": 10.84,
-        "estado": "cerrada",
+        "estado": "abierta",
         "precipitacion": 0,
         "puntos_criticos": 0,
         "pendiente": 0
