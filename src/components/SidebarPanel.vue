@@ -182,24 +182,98 @@
         <p class="section-desc">Encuentra el camino más rápido entre municipios utilizando el algoritmo de Dijkstra basado en kilómetros viales reales.</p>
 
         <div class="dijkstra-form">
-          <div class="input-item">
+          <!-- Nodo de Origen Autocomplete -->
+          <div class="input-item autocomplete-container">
             <label>Nodo de Origen</label>
-            <select :value="startNodeId" @change="$emit('update:startNodeId', $event.target.value)">
-              <option value="">-- Selecciona origen --</option>
-              <option v-for="node in sortedNodes" :key="node.id" :value="node.id">
-                {{ node.nombre }} ({{ node.tipo === 'municipio' ? 'M' : 'I' }})
-              </option>
-            </select>
+            <div class="search-input-wrapper">
+              <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+              <input 
+                type="text" 
+                v-model="startSearchQuery" 
+                placeholder="Escribe para buscar origen..." 
+                class="search-input-floating"
+                @focus="startSearchFocused = true"
+                @blur="handleStartBlur"
+              />
+              <button v-if="startSearchQuery" class="btn-clear-search" @click="clearStartNode" type="button">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            
+            <!-- Resultados Autocomplete -->
+            <div v-if="startSearchFocused && filteredStartNodes.length > 0" class="autocomplete-dropdown glass">
+              <div 
+                v-for="node in filteredStartNodes" 
+                :key="node.id" 
+                class="autocomplete-item"
+                @mousedown="selectStartNode(node)"
+              >
+                <span class="result-dot" :class="node.tipo"></span>
+                <div class="result-info">
+                  <span class="result-name">{{ node.nombre }}</span>
+                  <span class="result-type">{{ node.tipo === 'municipio' ? 'Municipio' : 'Intersección' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Zona de Soltar (Drop Zone Overlay) -->
+            <div 
+              v-if="activeDragNode" 
+              class="drop-zone-overlay glass" 
+              @mouseup.stop="handleDropNode('start')"
+            >
+              <div class="drop-zone-message">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="2"/></svg>
+                <span>Soltar como Origen</span>
+              </div>
+            </div>
           </div>
 
-          <div class="input-item">
+          <!-- Nodo de Destino Autocomplete -->
+          <div class="input-item autocomplete-container">
             <label>Nodo de Destino</label>
-            <select :value="endNodeId" @change="$emit('update:endNodeId', $event.target.value)">
-              <option value="">-- Selecciona destino --</option>
-              <option v-for="node in sortedNodes" :key="node.id" :value="node.id">
-                {{ node.nombre }} ({{ node.tipo === 'municipio' ? 'M' : 'I' }})
-              </option>
-            </select>
+            <div class="search-input-wrapper">
+              <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+              <input 
+                type="text" 
+                v-model="endSearchQuery" 
+                placeholder="Escribe para buscar destino..." 
+                class="search-input-floating"
+                @focus="endSearchFocused = true"
+                @blur="handleEndBlur"
+              />
+              <button v-if="endSearchQuery" class="btn-clear-search" @click="clearEndNode" type="button">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            
+            <!-- Resultados Autocomplete -->
+            <div v-if="endSearchFocused && filteredEndNodes.length > 0" class="autocomplete-dropdown glass">
+              <div 
+                v-for="node in filteredEndNodes" 
+                :key="node.id" 
+                class="autocomplete-item"
+                @mousedown="selectEndNode(node)"
+              >
+                <span class="result-dot" :class="node.tipo"></span>
+                <div class="result-info">
+                  <span class="result-name">{{ node.nombre }}</span>
+                  <span class="result-type">{{ node.tipo === 'municipio' ? 'Municipio' : 'Intersección' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Zona de Soltar (Drop Zone Overlay) -->
+            <div 
+              v-if="activeDragNode" 
+              class="drop-zone-overlay glass" 
+              @mouseup.stop="handleDropNode('end')"
+            >
+              <div class="drop-zone-message">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="2"/></svg>
+                <span>Soltar como Destino</span>
+              </div>
+            </div>
           </div>
 
           <div class="dijkstra-actions">
@@ -328,6 +402,7 @@ const props = defineProps({
   dijkstraResult: { type: Object, default: null },
   startNodeId: { type: String, default: '' },
   endNodeId: { type: String, default: '' },
+  activeDragNode: { type: Object, default: null },
   mapBounds: {
     type: Object,
     default: () => ({ minLng: -76.8, maxLng: -74.5, minLat: 5.5, maxLat: 8.9 })
@@ -372,6 +447,99 @@ const edgeEstado = ref('abierta')
 const edgePrecipitacion = ref(0)
 const edgePuntosCriticos = ref(0)
 const edgePendiente = ref(0)
+
+// --- AUTOCOMPLETADO DE RUTA (DIJKSTRA) ---
+const startSearchQuery = ref('')
+const startSearchFocused = ref(false)
+const endSearchQuery = ref('')
+const endSearchFocused = ref(false)
+
+// Sincronizar inputs de texto con los IDs seleccionados
+watch(() => props.startNodeId, (newId) => {
+  const node = props.nodes.find(n => n.id === newId)
+  startSearchQuery.value = node ? node.nombre : ''
+}, { immediate: true })
+
+watch(() => props.endNodeId, (newId) => {
+  const node = props.nodes.find(n => n.id === newId)
+  endSearchQuery.value = node ? node.nombre : ''
+}, { immediate: true })
+
+// Filtrar municipios e intersecciones para Origen
+const filteredStartNodes = computed(() => {
+  const q = startSearchQuery.value.toLowerCase().trim()
+  if (!q) {
+    // Mostrar por defecto los primeros 5 municipios
+    return props.nodes.filter(n => n.tipo === 'municipio').slice(0, 5)
+  }
+  return props.nodes.filter(n => 
+    n.nombre.toLowerCase().includes(q)
+  ).slice(0, 8)
+})
+
+// Filtrar municipios e intersecciones para Destino
+const filteredEndNodes = computed(() => {
+  const q = endSearchQuery.value.toLowerCase().trim()
+  if (!q) {
+    // Mostrar por defecto los primeros 5 municipios
+    return props.nodes.filter(n => n.tipo === 'municipio').slice(0, 5)
+  }
+  return props.nodes.filter(n => 
+    n.nombre.toLowerCase().includes(q)
+  ).slice(0, 8)
+})
+
+const selectStartNode = (node) => {
+  emit('update:startNodeId', node.id)
+  startSearchQuery.value = node.nombre
+  startSearchFocused.value = false
+}
+
+const selectEndNode = (node) => {
+  emit('update:endNodeId', node.id)
+  endSearchQuery.value = node.nombre
+  endSearchFocused.value = false
+}
+
+const clearStartNode = () => {
+  emit('update:startNodeId', '')
+  startSearchQuery.value = ''
+  startSearchFocused.value = false
+}
+
+const clearEndNode = () => {
+  emit('update:endNodeId', '')
+  endSearchQuery.value = ''
+  endSearchFocused.value = false
+}
+
+const handleStartBlur = () => {
+  setTimeout(() => {
+    startSearchFocused.value = false
+  }, 180)
+}
+
+const handleEndBlur = () => {
+  setTimeout(() => {
+    endSearchFocused.value = false
+  }, 180)
+}
+
+const handleDropNode = (role) => {
+  if (props.activeDragNode) {
+    if (role === 'start') {
+      emit('update:startNodeId', props.activeDragNode.id)
+      startSearchFocused.value = false
+    } else if (role === 'end') {
+      emit('update:endNodeId', props.activeDragNode.id)
+      endSearchFocused.value = false
+    }
+    // Quitar el foco de cualquier input activo
+    if (document.activeElement) {
+      document.activeElement.blur()
+    }
+  }
+}
 
 const loadElementProps = (element) => {
   if (!element) return
@@ -1228,5 +1396,81 @@ const gammaLabel = computed(() => {
   margin-top: 4px;
   border-top: 1px solid rgba(0,0,0,0.05);
   padding-top: 6px;
+}
+
+/* Autocompletado y Drop Zones */
+.autocomplete-container {
+  position: relative;
+  width: 100%;
+}
+
+.autocomplete-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(0, 133, 63, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  max-height: 180px;
+  overflow-y: auto;
+  z-index: 1000;
+  margin-top: 4px;
+  padding: 4px 0;
+}
+
+.autocomplete-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.autocomplete-item:hover {
+  background: rgba(0, 133, 63, 0.07);
+}
+
+.drop-zone-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 133, 63, 0.07);
+  border: 1.8px dashed #00853F;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1500;
+  cursor: copy;
+  animation: drop-pulse-border 1.5s infinite alternate;
+}
+
+.drop-zone-overlay:hover {
+  background: rgba(0, 133, 63, 0.14);
+  border-color: #00B259;
+}
+
+.drop-zone-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #005c2b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+@keyframes drop-pulse-border {
+  from {
+    border-color: rgba(0, 133, 63, 0.6);
+    background: rgba(0, 133, 63, 0.04);
+  }
+  to {
+    border-color: rgba(0, 133, 63, 1);
+    background: rgba(0, 133, 63, 0.12);
+  }
 }
 </style>

@@ -47,14 +47,24 @@
       </template>
     </div>
 
-    <!-- Preview de arista al crear vías -->
-    <svg
-      v-if="activeMode === 'add-edge' && edgeSourceId && previewPos"
-      class="edge-preview-svg"
-    >
+    <!-- Overlay SVG: anillo pulsante + preview de arista -->
+    <svg class="sigma-overlay">
+      <!-- Anillo pulsante del nodo seleccionado -->
+      <circle
+        v-if="pulsePos && selectedElementType === 'node'"
+        class="pulse-ring"
+        :cx="pulsePos.x"
+        :cy="pulsePos.y"
+        :r="pulsePos.r"
+        fill="none"
+        stroke="#00853F"
+        stroke-width="2"
+      />
+      <!-- Línea de preview al crear vías -->
       <line
-        :x1="edgeSourceScreenPos.x"
-        :y1="edgeSourceScreenPos.y"
+        v-if="activeMode === 'add-edge' && edgeSourceId && previewPos"
+        :x1="edgeSrcScreenPos.x"
+        :y1="edgeSrcScreenPos.y"
         :x2="previewPos.x"
         :y2="previewPos.y"
         stroke="rgba(0,133,63,0.65)"
@@ -67,13 +77,14 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import cytoscape from 'cytoscape'
+import Sigma from 'sigma'
+import Graph from 'graphology'
 
 const props = defineProps({
   nodes:               { type: Array,   required: true },
   edges:               { type: Array,   required: true },
   activeMode:          { type: String,  default: 'select' },
-  is3d:                { type: Boolean, default: false },   // kept for compat
+  is3d:                { type: Boolean, default: false },
   selectedElement:     { type: Object,  default: null },
   selectedElementType: { type: String,  default: null },
   dijkstraResult:      { type: Object,  default: null }
@@ -85,13 +96,22 @@ const emit = defineEmits([
 ])
 
 const containerRef = ref(null)
-let cy = null
-const currentZoom = ref(0.1)
-const edgeSourceId  = ref(null)
-const previewPos    = ref(null)
-let pulseInterval   = null
-let pulseDir        = 1
-let pulseVal        = 0.05
+let graph    = null
+let renderer = null
+
+// ─── Estado reactivo ──────────────────────────────────────────────────────────
+const cameraRatio   = ref(1)
+const currentZoom   = computed(() => 1 / cameraRatio.value)
+const selectedNodeId = ref(null)
+const selectedEdgeId = ref(null)
+const hoveredNodeId  = ref(null)
+const dijkstraNodeIds = ref(new Set())
+const dijkstraEdgeIds = ref(new Set())
+const edgeSourceId   = ref(null)
+const previewPos     = ref(null)
+const pulsePos       = ref(null)      // {x, y, r} en coords de pantalla
+const edgeSrcScreenPos = ref({ x: 0, y: 0 })
+let wasEmpty = true
 
 // ─── Modo ─────────────────────────────────────────────────────────────────────
 const modeClass = computed(() => ({
@@ -106,474 +126,359 @@ const modeLabel = computed(() => {
   return ''
 })
 
-// ─── Stylesheet Cytoscape ─────────────────────────────────────────────────────
-const CY_STYLE = [
-  // ─ Nodos base
-  {
-    selector: 'node',
-    style: {
-      'shape': 'ellipse',
-      'width': 16,
-      'height': 16,
-      'background-color': '#00853F',
-      'border-width': 1.5,
-      'border-color': 'rgba(0,0,0,0.18)',
-      'label': 'data(nombre)',
-      'font-size': 12,
-      'font-family': 'Inter, system-ui, sans-serif',
-      'font-weight': 700,
-      'text-valign': 'top',
-      'text-halign': 'center',
-      'text-margin-y': -6,
-      'color': '#1f2937',
-      'text-outline-width': 3,
-      'text-outline-color': '#ffffff',
-      'text-opacity': 0,
-      'z-index': 10
-    }
-  },
-  // ─ Intersecciones
-  {
-    selector: 'node[tipo="interseccion"]',
-    style: {
-      'background-color': '#F5A623',
-      'width': 10,
-      'height': 10
-    }
-  },
-  // ─ Seleccionado
-  {
-    selector: 'node.app-selected',
-    style: {
-      'background-color': '#00C965',
-      'border-width': 2.5,
-      'border-color': '#ffffff',
-      'width': 25.6,
-      'height': 25.6,
-      'text-opacity': 1,
-      'overlay-color': '#00853F',
-      'overlay-padding': 10,
-      'overlay-opacity': 0.2,
-      'z-index': 100
-    }
-  },
-  {
-    selector: 'node[tipo="interseccion"].app-selected',
-    style: {
-      'background-color': '#FFE054',
-      'border-color': '#ffffff',
-      'width': 16,
-      'height': 16
-    }
-  },
-  // ─ Dijkstra
-  {
-    selector: 'node.dijkstra-node',
-    style: {
-      'background-color': '#FFD100',
-      'border-color': 'rgba(0,0,0,0.22)',
-      'width': 29.6,
-      'height': 29.6,
-      'text-opacity': 1,
-      'overlay-color': '#FFD100',
-      'overlay-padding': 7,
-      'overlay-opacity': 0.25,
-      'z-index': 90
-    }
-  },
-  // ─ Nodo fuente de arista
-  {
-    selector: 'node.edge-source',
-    style: {
-      'background-color': '#F5A623',
-      'border-color': '#00B259',
-      'border-width': 3,
-      'width': 18,
-      'height': 18,
-      'text-opacity': 1,
-      'z-index': 95
-    }
-  },
-  // ─ Hover
-  {
-    selector: 'node.hovered',
-    style: { 'text-opacity': 1 }
-  },
-  // ─ Vías base (calzada sencilla = punteado)
-  {
-    selector: 'edge',
-    style: {
-      'width': 2,
-      'line-color': '#4b5563',
-      'curve-style': 'straight',
-      'target-arrow-shape': 'none',
-      'target-arrow-color': '#00853F',
-      'line-style': 'dashed',
-      'line-dash-pattern': [4, 4]
-    }
-  },
-  // ─ Calzada doble = línea continua y más gruesa
-  {
-    selector: 'edge[calzada="doble"]',
-    style: {
-      'line-style': 'solid',
-      'width': 4
-    }
-  },
-  // ─ Un sentido → flecha
-  {
-    selector: 'edge[sentido="un-sentido"]',
-    style: {
-      'target-arrow-shape': 'triangle',
-      'target-arrow-color': '#00853F'
-    }
-  },
-  // ─ Seleccionada
-  {
-    selector: 'edge.app-selected',
-    style: {
-      'line-color': '#F5A623',
-      'width': 5,
-      'overlay-color': '#F5A623',
-      'overlay-opacity': 0.25,
-      'overlay-padding': 5,
-      'z-index': 50
-    }
-  },
-  // ─ Ruta Dijkstra
-  {
-    selector: 'edge.dijkstra-edge',
-    style: {
-      'line-color': '#D4AF37',
-      'width': 6,
-      'line-style': 'solid',
-      'target-arrow-shape': 'none',
-      'overlay-color': '#FFD100',
-      'overlay-opacity': 0.2,
-      'overlay-padding': 5,
-      'z-index': 40
-    }
-  },
-  {
-    selector: 'edge[sentido="un-sentido"].dijkstra-edge',
-    style: {
-      'target-arrow-shape': 'triangle',
-      'target-arrow-color': '#D4AF37'
-    }
-  },
-  // ─ Vía cerrada
-  {
-    selector: 'edge.cerrada',
-    style: {
-      'line-color': '#7f1d1d',
-      'opacity': 0.65,
-      'line-style': 'dashed',
-      'line-dash-pattern': [4, 6]
-    }
-  },
-  // ─ Neutralizar overlay de selección nativo de Cytoscape
-  { selector: 'node:selected', style: { 'overlay-opacity': 0 } },
-  { selector: 'edge:selected', style: { 'overlay-opacity': 0 } }
-]
+// ─── Colores y tamaños base ───────────────────────────────────────────────────
+const BASE_SIZE  = { municipio: 8,   interseccion: 5 }
+const BASE_COLOR = { municipio: '#00853F', interseccion: '#F5A623' }
 
-// ─── Inicialización Cytoscape ─────────────────────────────────────────────────
+const nodeBaseSize  = (tipo) => BASE_SIZE[tipo]  ?? 5
+const nodeBaseColor = (tipo) => BASE_COLOR[tipo] ?? '#00853F'
+
+// ─── nodeReducer — estilización dinámica ─────────────────────────────────────
+const nodeReducer = (node, data) => {
+  const res        = { ...data }
+  const isSelected = selectedNodeId.value  === node
+  const isDijkstra = dijkstraNodeIds.value.has(node)
+  const isHovered  = hoveredNodeId.value   === node
+  const isEdgeSrc  = edgeSourceId.value    === node
+  const isSpecial  = isSelected || isDijkstra || isHovered || isEdgeSrc
+
+  // Etiqueta visible al zoom ≥ 260% o para nodos especiales
+  const showLabel = cameraRatio.value <= 0.385 || isSpecial
+  res.label = showLabel ? data.nombre : ''
+
+  if (isDijkstra) {
+    res.color  = '#FFD100'
+    res.size   = data.baseSize * 1.85
+    res.zIndex = 90
+  } else if (isSelected) {
+    res.color  = data.tipo === 'municipio' ? '#00C965' : '#FFE054'
+    res.size   = data.baseSize * 1.6
+    res.zIndex = 100
+  } else if (isEdgeSrc) {
+    res.color  = '#F5A623'
+    res.size   = data.baseSize * 1.2
+    res.zIndex = 95
+  } else if (isHovered) {
+    res.size   = data.baseSize * 1.15
+  }
+
+  return res
+}
+
+// ─── edgeReducer — estilización dinámica ─────────────────────────────────────
+const edgeReducer = (edge, data) => {
+  const res        = { ...data }
+  const isSelected = selectedEdgeId.value  === edge
+  const isDijkstra = dijkstraEdgeIds.value.has(edge)
+
+  if (isDijkstra) {
+    res.color  = '#D4AF37'
+    res.size   = 6
+    res.zIndex = 40
+  } else if (isSelected) {
+    res.color  = '#F5A623'
+    res.size   = 5
+    res.zIndex = 50
+  } else if (data.cerrada) {
+    res.color  = 'rgba(127,29,29,0.65)'
+  }
+
+  return res
+}
+
+// ─── Posiciones de pantalla (anillo + preview) ─────────────────────────────
+const updateOverlayPositions = () => {
+  if (!renderer || !graph) return
+
+  // Anillo pulsante
+  if (selectedNodeId.value) {
+    try {
+      const gx  = graph.getNodeAttribute(selectedNodeId.value, 'x')
+      const gy  = graph.getNodeAttribute(selectedNodeId.value, 'y')
+      const sp  = renderer.graphToViewport({ x: gx, y: gy })
+      const dd  = renderer.getNodeDisplayData(selectedNodeId.value)
+      const g2v = renderer.getGraphToViewportRatio()
+      pulsePos.value = { x: sp.x, y: sp.y, r: (dd?.size ?? 8) * g2v * 1.55 }
+    } catch { pulsePos.value = null }
+  } else {
+    pulsePos.value = null
+  }
+
+  // Fuente de arista
+  if (edgeSourceId.value) {
+    try {
+      const gx = graph.getNodeAttribute(edgeSourceId.value, 'x')
+      const gy = graph.getNodeAttribute(edgeSourceId.value, 'y')
+      edgeSrcScreenPos.value = renderer.graphToViewport({ x: gx, y: gy })
+    } catch { /* noop */ }
+  }
+}
+
+// ─── Inicialización ───────────────────────────────────────────────────────────
 onMounted(() => {
-  cy = cytoscape({
-    container: containerRef.value,
-    elements: buildElements(),
-    style: CY_STYLE,
-    layout: { name: 'preset' },
-    zoomingEnabled: true,
-    userZoomingEnabled: true,
-    panningEnabled: true,
-    userPanningEnabled: true,
-    autoungrabify: true,          // nodos no arrastrables
-    boxSelectionEnabled: false,
-    minZoom: 0.04,
-    maxZoom: 15
+  graph = new Graph({ type: 'mixed', multi: false })
+
+  props.nodes.forEach(n => {
+    const bs = nodeBaseSize(n.tipo)
+    graph.addNode(n.id, {
+      x: n.x, y: n.y,
+      size: bs, baseSize: bs,
+      color: nodeBaseColor(n.tipo),
+      label: '', nombre: n.nombre, tipo: n.tipo
+    })
   })
 
-  cy.autounselectify(true)   // Cytoscape no agrega estado :selected propio
+  props.edges.forEach(e => addGraphEdge(e))
 
-  cy.on('tap', 'node', handleNodeTap)
-  cy.on('tap', 'edge', handleEdgeTap)
-  cy.on('tap',         handleBackgroundTap)
-  cy.on('zoom pan',    () => { currentZoom.value = cy.zoom() })
-  cy.on('zoom',        applyZoomLabels)
-  cy.on('mouseover', 'node', e => {
-    e.target.addClass('hovered')
-    applyZoomLabels()
-  })
-  cy.on('mouseout', 'node', e => {
-    e.target.removeClass('hovered')
-    applyZoomLabels()
+  renderer = new Sigma(graph, containerRef.value, {
+    renderEdgeLabels:      false,
+    enableEdgeEvents:      true,
+    defaultNodeType:       'circle',
+    defaultEdgeType:       'line',
+    labelFont:             'Inter, system-ui, sans-serif',
+    labelSize:             12,
+    labelWeight:           'bold',
+    labelColor:            { color: '#1f2937' },
+    labelBackgroundColor:  '#ffffff',
+    labelRenderedSizeThreshold: 0,    // la visibilidad la controla el reducer
+    stagePadding:          60,
+    zIndex:                true,
+    minCameraRatio:        0.067,     // zoom máx ~1500%
+    maxCameraRatio:        10,
+    nodeReducer,
+    edgeReducer
   })
 
-  setTimeout(() => resetView(), 150)
+  // Eventos de cámara
+  renderer.getCamera().on('updated', state => {
+    cameraRatio.value = state.ratio
+    renderer.refresh()        // re-evalúa reducers (etiquetas, estados)
+    updateOverlayPositions()
+  })
+
+  // Eventos de render
+  renderer.on('afterRender', updateOverlayPositions)
+
+  // ─── Drag de nodos ────────────────────────────────────────────────────────
+  let draggedNode = null
+  let hasDragged  = false
+
+  renderer.on('downNode', ({ node }) => {
+    if (props.activeMode !== 'select') return
+    draggedNode = node
+    hasDragged  = false
+    renderer.getCamera().disable()
+  })
+
+  renderer.getMouseCaptor().on('mousemovebody', (e) => {
+    if (!draggedNode) return
+    hasDragged = true
+    const pos = renderer.viewportToGraph(e)
+    graph.setNodeAttribute(draggedNode, 'x', pos.x)
+    graph.setNodeAttribute(draggedNode, 'y', pos.y)
+    emit('move-node', { nodeId: draggedNode, x: pos.x, y: pos.y })
+    e.preventSigmaDefault()
+    renderer.refresh()
+  })
+
+  renderer.getMouseCaptor().on('mouseup', () => {
+    if (draggedNode) {
+      renderer.getCamera().enable()
+      if (hasDragged) emit('move-node-end')
+      draggedNode = null
+    }
+  })
+
+  // Click en nodo
+  renderer.on('clickNode', ({ node }) => {
+    if (hasDragged) return  // fue drag, no click
+    if (props.activeMode === 'select') {
+      const nodeData = props.nodes.find(n => n.id === node)
+      if (nodeData) emit('select-node', nodeData)
+    } else if (props.activeMode === 'add-edge') {
+      if (!edgeSourceId.value) {
+        edgeSourceId.value = node
+        renderer.refresh()
+      } else if (edgeSourceId.value !== node) {
+        emit('add-edge', { sourceId: edgeSourceId.value, targetId: node })
+        edgeSourceId.value = null
+        previewPos.value   = null
+        renderer.refresh()
+      }
+    }
+  })
+
+  // Click en arista
+  renderer.on('clickEdge', ({ edge }) => {
+    if (props.activeMode !== 'select') return
+    const edgeData = props.edges.find(e => e.id === edge)
+    if (edgeData) emit('select-edge', edgeData)
+  })
+
+  // Click en fondo
+  renderer.on('clickStage', ({ event }) => {
+    if (props.activeMode === 'add-node') {
+      const graphCoords = renderer.viewportToGraph({ x: event.x, y: event.y })
+      emit('add-node', graphCoords)
+    } else {
+      emit('clear-selection')
+    }
+  })
+
+  // Hover
+  renderer.on('enterNode', ({ node }) => {
+    hoveredNodeId.value = node
+    renderer.refresh()
+  })
+  renderer.on('leaveNode', () => {
+    hoveredNodeId.value = null
+    renderer.refresh()
+  })
 })
 
 onUnmounted(() => {
-  stopPulse()
-  if (cy) cy.destroy()
+  if (renderer) { renderer.kill(); renderer = null }
+  graph = null
 })
 
-// ─── Build elements ───────────────────────────────────────────────────────────
-const buildElements = () => {
-  const els = []
-  props.nodes.forEach(n => {
-    els.push({
-      group: 'nodes',
-      data: { id: n.id, nombre: n.nombre, tipo: n.tipo },
-      position: { x: n.x, y: n.y }
-    })
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const addGraphEdge = (e) => {
+  if (!graph || !graph.hasNode(e.source) || !graph.hasNode(e.target)) return
+  if (graph.hasEdge(e.id)) return
+  graph.addEdgeWithKey(e.id, e.source, e.target, {
+    size:    e.calzada === 'doble' ? 4 : 2,
+    color:   e.estado === 'cerrada' ? 'rgba(127,29,29,0.65)' : '#4b5563',
+    type:    e.sentido === 'un-sentido' ? 'arrow' : 'line',
+    cerrada: e.estado === 'cerrada',
+    sentido: e.sentido || 'doble',
+    calzada: e.calzada || 'sencilla'
   })
-  props.edges.forEach(e => {
-    const el = {
-      group: 'edges',
-      data: {
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sentido: e.sentido || 'doble',
-        calzada: e.calzada || 'sencilla'
-      }
-    }
-    if (e.estado === 'cerrada') el.classes = 'cerrada'
-    els.push(el)
-  })
-  return els
 }
 
-// ─── Watchers de sincronización ───────────────────────────────────────────────
-let wasEmpty = true
-
+// ─── Watchers ─────────────────────────────────────────────────────────────────
 watch(() => props.nodes, newNodes => {
-  if (!cy) return
-  cy.startBatch()
+  if (!graph || !renderer) return
 
-  const existingIds = new Set(cy.nodes().map(n => n.id()))
+  const existingIds = new Set(graph.nodes())
   const newIds      = new Set(newNodes.map(n => n.id))
 
-  cy.nodes().filter(n => !newIds.has(n.id())).remove()
+  graph.nodes().filter(id => !newIds.has(id)).forEach(id => graph.dropNode(id))
 
   newNodes.forEach(n => {
     if (existingIds.has(n.id)) {
-      const node = cy.getElementById(n.id)
-      node.data({ nombre: n.nombre, tipo: n.tipo })
-      node.position({ x: n.x, y: n.y })
+      const bs = nodeBaseSize(n.tipo)
+      graph.setNodeAttribute(n.id, 'x',        n.x)
+      graph.setNodeAttribute(n.id, 'y',        n.y)
+      graph.setNodeAttribute(n.id, 'nombre',   n.nombre)
+      graph.setNodeAttribute(n.id, 'tipo',     n.tipo)
+      graph.setNodeAttribute(n.id, 'baseSize', bs)
+      graph.setNodeAttribute(n.id, 'color',    nodeBaseColor(n.tipo))
+      graph.setNodeAttribute(n.id, 'size',     bs)
     } else {
-      cy.add({
-        group: 'nodes',
-        data: { id: n.id, nombre: n.nombre, tipo: n.tipo },
-        position: { x: n.x, y: n.y }
+      const bs = nodeBaseSize(n.tipo)
+      graph.addNode(n.id, {
+        x: n.x, y: n.y,
+        size: bs, baseSize: bs,
+        color: nodeBaseColor(n.tipo),
+        label: '', nombre: n.nombre, tipo: n.tipo
       })
     }
   })
 
-  cy.endBatch()
-  applyZoomLabels()
+  renderer.refresh()
 
-  // Centrar vista cuando los datos cargan por primera vez
   if (wasEmpty && newNodes.length > 0) {
     wasEmpty = false
-    setTimeout(() => resetView(), 100)
+    setTimeout(() => renderer?.getCamera().animatedReset(), 150)
   }
 }, { deep: true })
 
 watch(() => props.edges, newEdges => {
-  if (!cy) return
-  cy.startBatch()
+  if (!graph || !renderer) return
 
-  const existingIds = new Set(cy.edges().map(e => e.id()))
+  const existingIds = new Set(graph.edges())
   const newIds      = new Set(newEdges.map(e => e.id))
 
-  cy.edges().filter(e => !newIds.has(e.id())).remove()
+  graph.edges().filter(id => !newIds.has(id)).forEach(id => graph.dropEdge(id))
 
   newEdges.forEach(e => {
     if (existingIds.has(e.id)) {
-      const edge = cy.getElementById(e.id)
-      edge.data({ sentido: e.sentido || 'doble', calzada: e.calzada || 'sencilla' })
-      e.estado === 'cerrada' ? edge.addClass('cerrada') : edge.removeClass('cerrada')
+      graph.setEdgeAttribute(e.id, 'size',    e.calzada === 'doble' ? 4 : 2)
+      graph.setEdgeAttribute(e.id, 'color',   e.estado === 'cerrada' ? 'rgba(127,29,29,0.65)' : '#4b5563')
+      graph.setEdgeAttribute(e.id, 'type',    e.sentido === 'un-sentido' ? 'arrow' : 'line')
+      graph.setEdgeAttribute(e.id, 'cerrada', e.estado === 'cerrada')
     } else {
-      const added = cy.add({
-        group: 'edges',
-        data: {
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          sentido: e.sentido || 'doble',
-          calzada: e.calzada || 'sencilla'
-        }
-      })
-      if (e.estado === 'cerrada') added.addClass('cerrada')
+      addGraphEdge(e)
     }
   })
 
-  cy.endBatch()
+  renderer.refresh()
 }, { deep: true })
 
 watch(() => props.selectedElement, newEl => {
-  if (!cy) return
-  cy.startBatch()
-  cy.elements('.app-selected').removeClass('app-selected')
-  stopPulse()
-
-  if (newEl) {
-    const el = cy.getElementById(newEl.id)
-    if (!el.empty()) {
-      el.addClass('app-selected')
-      if (props.selectedElementType === 'node') startPulse(el)
-    }
+  if (props.selectedElementType === 'node') {
+    selectedNodeId.value = newEl?.id ?? null
+    selectedEdgeId.value = null
+  } else if (props.selectedElementType === 'edge') {
+    selectedEdgeId.value = newEl?.id ?? null
+    selectedNodeId.value = null
+  } else {
+    selectedNodeId.value = null
+    selectedEdgeId.value = null
   }
-  applyZoomLabels()
-  cy.endBatch()
+  if (renderer) renderer.refresh()
+  updateOverlayPositions()
 })
 
 watch(() => props.dijkstraResult, result => {
-  if (!cy) return
-  cy.startBatch()
-  cy.elements('.dijkstra-node, .dijkstra-edge').removeClass('dijkstra-node dijkstra-edge')
-  if (result) {
-    result.nodeIds.forEach(id => cy.getElementById(id).addClass('dijkstra-node'))
-    result.edgeIds.forEach(id => cy.getElementById(id).addClass('dijkstra-edge'))
-  }
-  applyZoomLabels()
-  cy.endBatch()
+  dijkstraNodeIds.value = new Set(result?.nodeIds ?? [])
+  dijkstraEdgeIds.value = new Set(result?.edgeIds ?? [])
+  if (renderer) renderer.refresh()
 })
 
 watch(() => props.activeMode, mode => {
-  if (!cy) return
   if (mode !== 'add-edge') {
     edgeSourceId.value = null
     previewPos.value   = null
-    cy.nodes().removeClass('edge-source')
+    if (renderer) renderer.refresh()
   }
 })
 
-// ─── Handlers de eventos Cytoscape ───────────────────────────────────────────
-const handleNodeTap = e => {
-  e.stopPropagation()
-  const nodeId   = e.target.id()
-  const nodeData = props.nodes.find(n => n.id === nodeId)
-  if (!nodeData) return
-
-  if (props.activeMode === 'select') {
-    emit('select-node', nodeData)
-  } else if (props.activeMode === 'add-edge') {
-    if (!edgeSourceId.value) {
-      edgeSourceId.value = nodeId
-      e.target.addClass('edge-source')
-    } else if (edgeSourceId.value !== nodeId) {
-      emit('add-edge', { sourceId: edgeSourceId.value, targetId: nodeId })
-      cy.nodes().removeClass('edge-source')
-      edgeSourceId.value = null
-      previewPos.value   = null
-    }
-  }
-}
-
-const handleEdgeTap = e => {
-  e.stopPropagation()
-  if (props.activeMode !== 'select') return
-  const edgeId   = e.target.id()
-  const edgeData = props.edges.find(ed => ed.id === edgeId)
-  if (edgeData) emit('select-edge', edgeData)
-}
-
-const handleBackgroundTap = e => {
-  if (e.target !== cy) return
-  if (props.activeMode === 'add-node') {
-    const pos = e.position
-    emit('add-node', { x: pos.x, y: pos.y })
-  } else {
-    emit('clear-selection')
-  }
-}
-
-// Etiquetas visibles al zoom >= 260% o para nodos especiales
-const applyZoomLabels = () => {
-  if (!cy) return
-  const showAll = cy.zoom() >= 2.6
-  cy.nodes().forEach(node => {
-    const special = node.hasClass('app-selected') ||
-                    node.hasClass('dijkstra-node') ||
-                    node.hasClass('hovered') ||
-                    node.hasClass('edge-source')
-    node.style('text-opacity', showAll || special ? 1 : 0)
-  })
-}
-
-// Preview de arista: posición del mouse en coordenadas del contenedor
+// ─── Mouse move (preview de arista) ──────────────────────────────────────────
 const handleContainerMouseMove = e => {
   if (props.activeMode === 'add-edge' && edgeSourceId.value) {
-    const rect   = containerRef.value.getBoundingClientRect()
+    const rect       = containerRef.value.getBoundingClientRect()
     previewPos.value = { x: e.clientX - rect.left, y: e.clientY - rect.top }
   }
 }
 
-// Posición en pantalla del nodo fuente (para el SVG de preview)
-const edgeSourceScreenPos = computed(() => {
-  if (!cy || !edgeSourceId.value) return { x: 0, y: 0 }
-  const node = cy.getElementById(edgeSourceId.value)
-  if (node.empty()) return { x: 0, y: 0 }
-  return node.renderedPosition()
-})
-
-// ─── Animación de pulso del nodo seleccionado ─────────────────────────────────
-const startPulse = node => {
-  stopPulse()
-  pulseVal = 0.05
-  pulseDir = 1
-  pulseInterval = setInterval(() => {
-    if (!cy || !node) return
-    pulseVal += pulseDir * 0.015
-    if (pulseVal >= 0.5)  pulseDir = -1
-    if (pulseVal <= 0.04) pulseDir =  1
-    node.style('overlay-opacity', pulseVal)
-  }, 20)
-}
-
-const stopPulse = () => {
-  if (pulseInterval) { clearInterval(pulseInterval); pulseInterval = null }
-}
-
 // ─── Navegación ──────────────────────────────────────────────────────────────
 const zoomIn = () => {
-  if (!cy || !containerRef.value) return
-  cy.zoom({
-    level: Math.min(cy.zoom() * 1.35, 15),
-    renderedPosition: {
-      x: containerRef.value.offsetWidth  / 2,
-      y: containerRef.value.offsetHeight / 2
-    }
-  })
+  renderer?.getCamera().animatedZoom({ factor: 1.35 })
 }
 
 const zoomOut = () => {
-  if (!cy || !containerRef.value) return
-  cy.zoom({
-    level: Math.max(cy.zoom() / 1.35, 0.04),
-    renderedPosition: {
-      x: containerRef.value.offsetWidth  / 2,
-      y: containerRef.value.offsetHeight / 2
-    }
-  })
+  renderer?.getCamera().animatedUnzoom({ factor: 1.35 })
 }
 
 const resetView = () => {
-  if (!cy || cy.nodes().empty()) return
-  cy.fit(cy.nodes(), 60)
+  renderer?.getCamera().animatedReset()
   emit('zoom-reset')
 }
 
 const centerOnCoordinates = (x, y) => {
-  if (!cy) return
-  cy.animate({
-    zoom: Math.max(cy.zoom(), 0.8),
-    center: { position: { x, y } },
-    duration: 300,
-    easing: 'ease-out'
+  if (!renderer || !graph) return
+  const nodeId = graph.nodes().find(id => {
+    const attrs = graph.getNodeAttributes(id)
+    return Math.abs(attrs.x - x) < 1 && Math.abs(attrs.y - y) < 1
   })
+  if (!nodeId) return
+  const dd = renderer.getNodeDisplayData(nodeId)
+  if (!dd) return
+  renderer.getCamera().animate(
+    { x: dd.x, y: dd.y, ratio: Math.min(renderer.getCamera().ratio, 0.5) },
+    { duration: 300 }
+  )
 }
 
 defineExpose({ centerOnCoordinates, resetView })
@@ -586,8 +491,7 @@ defineExpose({ centerOnCoordinates, resetView })
   position: relative;
   overflow: hidden;
   cursor: grab;
-  /* Cuadrícula de puntos como fondo */
-  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.07) 1.2px, transparent 1.2px);
+  background-image: radial-gradient(circle, rgba(0,0,0,0.07) 1.2px, transparent 1.2px);
   background-size: 50px 50px;
   background-color: #f8fafc;
 }
@@ -596,7 +500,7 @@ defineExpose({ centerOnCoordinates, resetView })
 .canvas-container.mode-add-node { cursor: crosshair; }
 .canvas-container.mode-add-edge { cursor: cell; }
 
-/* Controles flotantes de navegación */
+/* Controles flotantes */
 .navigation-controls {
   position: absolute;
   top: 16px;
@@ -613,7 +517,7 @@ defineExpose({ centerOnCoordinates, resetView })
   height: 30px;
   padding: 0;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(0,0,0,0.04);
   border: 1px solid var(--glass-border);
   color: #1f2937;
   flex-shrink: 0;
@@ -625,14 +529,14 @@ defineExpose({ centerOnCoordinates, resetView })
 }
 
 .navigation-controls button:hover {
-  background: rgba(0, 133, 63, 0.1);
+  background: rgba(0,133,63,0.1);
   color: #00853F;
 }
 
 .nav-divider {
   width: 1px;
   height: 18px;
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(0,0,0,0.1);
   margin: 0 2px;
   flex-shrink: 0;
 }
@@ -666,7 +570,7 @@ defineExpose({ centerOnCoordinates, resetView })
   color: hsl(var(--text-light));
 }
 
-/* Barra de estado inferior */
+/* Barra de estado */
 .canvas-statusbar {
   position: absolute;
   bottom: 16px;
@@ -690,14 +594,25 @@ defineExpose({ centerOnCoordinates, resetView })
   color: #c47d00;
 }
 
-/* SVG de preview de arista */
-.edge-preview-svg {
+/* Overlay SVG: anillo + preview */
+.sigma-overlay {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   pointer-events: none;
   z-index: 8;
+}
+
+/* Anillo pulsante */
+.pulse-ring {
+  animation: pulse-ring 1.3s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1.0);  opacity: 0.75; }
+  50%  { transform: scale(1.55); opacity: 0.12; }
+  100% { transform: scale(1.0);  opacity: 0.75; }
 }
 </style>

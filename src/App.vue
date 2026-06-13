@@ -33,6 +33,9 @@
           @add-node="addNode"
           @add-edge="addEdge"
           @zoom-reset="handleZoomReset"
+          @node-drag-start="handleNodeDragStart"
+          @node-drag-move="handleNodeDragMove"
+          @node-drag-end="handleNodeDragEnd"
           ref="canvasRef"
         />
         
@@ -131,6 +134,7 @@
           :selected-element-type="selectedElementType"
           :dijkstra-result="dijkstraResult"
           :map-bounds="mapBounds"
+          :active-drag-node="activeDragNode"
           v-model:start-node-id="dijkstraStartNodeId"
           v-model:end-node-id="dijkstraEndNodeId"
           @update-node="updateNode"
@@ -155,6 +159,16 @@
         <span>{{ toast.message }}</span>
       </div>
     </Transition>
+
+    <!-- Indicador flotante para arrastre de nodos -->
+    <div 
+      v-if="activeDragNode" 
+      class="floating-drag-badge glass" 
+      :style="{ left: dragMouseX + 'px', top: dragMouseY + 'px' }"
+    >
+      <span class="drag-badge-dot"></span>
+      <span class="drag-badge-text">{{ activeDragNode.nombre }}</span>
+    </div>
 
     <!-- Modal para Agregar Nodo por Coordenadas -->
     <Transition name="modal-fade">
@@ -213,7 +227,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import GraphCanvas from './components/GraphCanvas.vue'
 import SidebarPanel from './components/SidebarPanel.vue'
 
@@ -566,6 +580,30 @@ const addNode = ({ x, y }) => {
 const handleMoveNodeEnd = () => {
   pushState()
   saveGeoJSON() // Autoguardado
+}
+
+// Variables de estado para el arrastre de nodos (Dijkstra)
+const activeDragNode = ref(null)
+const dragMouseX = ref(0)
+const dragMouseY = ref(0)
+
+const handleNodeDragStart = (nodeData) => {
+  activeDragNode.value = nodeData
+}
+
+const handleNodeDragMove = ({ clientX, clientY }) => {
+  dragMouseX.value = clientX
+  dragMouseY.value = clientY
+}
+
+const handleNodeDragEnd = () => {
+  activeDragNode.value = null
+}
+
+const handleWindowMouseUp = () => {
+  if (activeDragNode.value) {
+    activeDragNode.value = null
+  }
 }
 
 // Variables de estado para el Buscador Flotante
@@ -978,6 +1016,12 @@ const handleKeyDown = (e) => {
 onMounted(() => {
   loadGeoJSON()
   window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('mouseup', handleWindowMouseUp)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('mouseup', handleWindowMouseUp)
 })
 </script>
 
@@ -1528,5 +1572,50 @@ onMounted(() => {
 @keyframes pulse {
   from { filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.3)); }
   to { filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.65)); }
+}
+
+/* Indicador flotante para arrastre de nodos */
+.floating-drag-badge {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  transform: translate(-50%, -50%);
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1.5px solid #00853F;
+  border-radius: 24px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #1f2937;
+  backdrop-filter: blur(8px);
+  animation: drag-pulse-glow 1.5s infinite alternate;
+}
+
+.drag-badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00853F;
+  box-shadow: 0 0 6px rgba(0, 133, 63, 0.8);
+}
+
+.drag-badge-text {
+  white-space: nowrap;
+}
+
+@keyframes drag-pulse-glow {
+  from {
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 0 0px rgba(0, 133, 63, 0);
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 0 8px rgba(0, 133, 63, 0.35);
+    transform: translate(-50%, -50%) scale(1.03);
+  }
 }
 </style>
