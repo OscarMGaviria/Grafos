@@ -290,8 +290,7 @@ onMounted(() => {
     autoungrabify: true,          // nodos no arrastrables
     boxSelectionEnabled: false,
     minZoom: 0.04,
-    maxZoom: 15,
-    wheelSensitivity: 0.25
+    maxZoom: 15
   })
 
   cy.autounselectify(true)   // Cytoscape no agrega estado :selected propio

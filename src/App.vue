@@ -764,8 +764,10 @@ const centerOnNode = (nodeId) => {
   }
 }
 
-const handleZoomReset = () => {
-  // Lógica opcional para resetear zoom desde canvas
+const handleZoomReset = () => {}
+
+const addNodeByCoordinates = () => {
+  openAddNodeModal()
 }
 
 // --- DIJKSTRA (RUTA MÁS CORTA) ---
